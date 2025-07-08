@@ -1,8 +1,6 @@
 import logging
 import gradio as gr
 import boto3
-import base64
-import json
 import time
 from mangum import Mangum
 from fastapi import FastAPI
@@ -11,8 +9,17 @@ import pandas as pd
 import uuid
 import os
 import sys
-import re
 from threading import Thread
+
+# Add the parent directory to the Python path for local execution
+if "AWS_LAMBDA_FUNCTION_NAME" not in os.environ:
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from common.llm import format_result, invoke_model
+from common.utils import get_bedrock_client
+from prompt import TIMECARD
+
 
 LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)
@@ -25,24 +32,8 @@ if not LOGGER.handlers:
 JOB_STATUS_TABLE = os.environ.get("JOB_STATUS_TABLE", 'TimecardStack-JobStatusTable044F2BF7-3P8MQT4XW1RX')
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(JOB_STATUS_TABLE) if JOB_STATUS_TABLE else None
+MODEL_ID = 'arn:aws:bedrock:us-east-1:471112955155:inference-profile/us.meta.llama4-scout-17b-instruct-v1:0'
 
-
-def format_result(content, type='json'):
-    if type == 'json':
-        pattern = r'(?P<quote>["\'`]{3})json\s*(?P<json>(\{.*?\}|\[.*?\]))\s*(?P=quote)'
-        matches = list(re.finditer(pattern, content, re.DOTALL))
-        if matches:
-            json_str = matches[-1].group("json")
-            return json.loads(json_str)
-        else:
-            return json.loads(content)
-    elif type == 'markdown':
-        pattern = r'(?P<quote>["\'`]{3})markdown\s+(.*?)(?P=quote)'
-        match = re.search(pattern, content, re.DOTALL)
-        if match:
-            return match.group(2)
-        else:
-            return content
 
 def analyze_image_background(image_path, job_id):
     LOGGER.info(f"Starting analyze_image for: {image_path}")
@@ -56,11 +47,8 @@ def analyze_image_background(image_path, job_id):
             if image_format not in ['jpeg', 'png', 'gif', 'webp']:
                 raise ValueError(f"Unsupported image format: {image_format}")
 
-            media_type = f"image/{image_format}"
-
             with open(image_path, "rb") as image_file:
-                # encoded_string = base64.b64encode(image_file.read()).decode()
-                encoded_string = image_file.read()
+                image_bytes = image_file.read()
         LOGGER.info("Image processed and encoded successfully.")
     except Exception as e:
         LOGGER.error(f"Error processing image: {e}")
@@ -68,79 +56,8 @@ def analyze_image_background(image_path, job_id):
             table.put_item(Item={"job_id": job_id, "status": "failed", "failed_reason": f"Error processing image: {e}"})
         return
 
-    prompt = f"""Please extract all records and total amount from the attached timecard image. For each record, provide the following fields firstly:
-    - ACCT NO
-    - JOB NO
-    - QUANTITY
-    - RATE
-    - HOURS
-    - AMOUNT
-    - DESCRIPTION OF WORK
-    - EMPLOYEE NAME
-    - HIRE DATE
-    - SHIFT
-    - MO_DAY_YR
-    - COST CENTER
-    - CLOCK
-
-    If a field is not present, leave it blank.
-    Then double check the correctness of the hours and amount field with the total hours and amount data you extract from the image.
-    Make sure the data in each column could sum up to the total hours and amount.
-    
-    Finally, format the output as a JSON object with two keys: "records" and "totals".
-    The "records" key should contain a JSON array of objects, where each object represents a single record.
-    The "totals" key should contain a JSON object with the following keys: "Total Hours", "Total Amount", "Corrections".
-    *BE SURE* all the values you output is extracted from the image, not by your assumption.
-    For example:
-    ```json
-    {{
-        "records": [
-            {{
-                "ACCT NO": "123",
-                "JOB NO": "456",
-                ...
-            }},
-            {{
-                "ACCT NO": "789",
-                "JOB NO": "101",
-                ...
-            }}
-        ],
-        "totals": {{
-            "Total Hours": "",
-            "Total Amount": "",
-            "Corrections": ""
-        }}
-    }}
-    ```
-    """
-
-    request_body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 4096,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": encoded_string
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt
-                    }
-                ]
-            }
-        ]
-    }
-
     try:
-        result = invoke_llama4_scout(encoded_string, prompt)
+        result = invoke_model(get_bedrock_client(), MODEL_ID, TIMECARD, max_tokens=1024, attachment=(image_bytes, image_format), temperature=0.5)
         data = format_result(result)
         records = data.get("records", [])
         totals = data.get("totals", {})
@@ -153,97 +70,10 @@ def analyze_image_background(image_path, job_id):
 
         if table:
             table.put_item(Item={"job_id": job_id, "status": "success", "result": df.to_json(), "totals_result": totals_df.to_json()})
-    except json.JSONDecodeError as e:
-        LOGGER.error(f"Error decoding JSON from extracted text: {e}")
-        if table:
-            table.put_item(Item={"job_id": job_id, "status": "failed", "failed_reason": f"Error decoding JSON from extracted text: {e}"})
-     
-     
-    # bedrock = get_bedrock_client()
-    # try:
-    #     response = bedrock.invoke_model(
-    #         body=json.dumps(request_body),
-    #         modelId="arn:aws:bedrock:us-east-1:471112955155:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0",
-    #         accept="application/json",
-    #         contentType="application/json"
-    #     )
-
-    #     response_body = json.loads(response.get("body").read())
-    #     LOGGER.info(f"Bedrock Response Body: {response_body}")
-        
-    #     if 'error' in response_body:
-    #         error_message = response_body['error']
-    #         LOGGER.error(f"Bedrock API Error: {error_message}")
-    #         if table:
-    #             table.put_item(Item={"job_id": job_id, "status": "failed", "failed_reason": f"Bedrock API Error: {error_message}"})
-    #         return
-
-    #     try:
-    #         data = format_result(response_body['content'][0]['text'])
-    #         df = pd.DataFrame(data)
-    #         LOGGER.info(f"DataFrame created: {df}")
-    #         if table:
-    #             table.put_item(Item={"job_id": job_id, "status": "success", "result": df.to_json()})
-    #     except json.JSONDecodeError as e:
-    #         LOGGER.error(f"Error decoding JSON from extracted text: {e}")
-    #         if table:
-    #             table.put_item(Item={"job_id": job_id, "status": "failed", "failed_reason": f"Error decoding JSON from extracted text: {e}"})
-
-    # except (json.JSONDecodeError, IndexError, KeyError) as e:
-    #     LOGGER.error(f"Error parsing Bedrock response: {e}")
-    #     if table:
-    #         table.put_item(Item={"job_id": job_id, "status": "failed", "failed_reason": f"Error parsing Bedrock response: {e}"})
-    # except Exception as e:
-    #     LOGGER.error(f"An unexpected error occurred: {e}")
-    #     if table:
-    #         table.put_item(Item={"job_id": job_id, "status": "failed", "failed_reason": f"An unexpected error occurred: {e}"})
-
-
-def invoke_llama4_scout(image_data, prompt):
-
-    # Construct the request body
-    request_body = {
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "image": {
-                            "format": "png",
-                            "source": {
-                                "bytes": image_data
-                            }
-                        }
-                    },
-                    {
-                        "text": prompt
-                    }
-                ]
-            }
-        ]
-    }
-
-    try:
-        # Invoke the model using the Converse API
-        bedrock = get_bedrock_client()
-        response = bedrock.converse(
-            modelId="arn:aws:bedrock:us-east-1:471112955155:inference-profile/us.meta.llama4-scout-17b-instruct-v1:0",
-            messages=request_body["messages"],
-            inferenceConfig={
-                "maxTokens": 1024,
-                "temperature": 0.6,
-                "topP": 0.9
-            }
-        )
-
-        # Extract and print the response text
-        response_text = response["output"]["message"]["content"][0]["text"]
-        print("Model response:")
-        print(response_text)
-        return response_text
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        exit(1)
+        LOGGER.error(f"process timecard failed: {e}")
+        if table:
+            table.put_item(Item={"job_id": job_id, "status": "failed", "failed_reason": f"process timecard failed: {e}"})
 
 
 def start_analysis(image_path, job_id):
@@ -257,7 +87,7 @@ def start_analysis(image_path, job_id):
     job_id = str(uuid.uuid4())
     thread = Thread(target=analyze_image_background, args=(image_path, job_id))
     thread.start()
-    if not os.environ.get('RUN_IN_LAMBDA'):
+    if not os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
         while True:
             time.sleep(1)
             o1, o2, o3, is_running, job_id = get_analysis_status(job_id, True)
@@ -315,8 +145,6 @@ def delete_from_staging(df, index):
 def submit_all(df):
     return "Submission successful!"
 
-def get_bedrock_client():
-    return boto3.client(service_name="bedrock-runtime")
 
 def create_gradio_app():
     with gr.Blocks() as demo:
@@ -359,7 +187,7 @@ def create_gradio_app():
         submission_status = gr.Label()
         
         analyze_button.click(start_analysis, inputs=[image_input, job_id], outputs=[extracted_table, staging_table, totals_table, job_id, is_running, submission_status])
-        if os.environ.get('RUN_IN_LAMBDA'):
+        if os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
             demo.load(get_analysis_status, inputs=[job_id, is_running], outputs=[extracted_table, staging_table, totals_table, is_running, job_id], every=1)
 
         def on_select(evt: gr.SelectData):
@@ -377,7 +205,7 @@ def create_gradio_app():
     return demo
 
 gradio_app = create_gradio_app()
-gradio_app.queue(default_concurrency_limit=1)  # 限制并发
+gradio_app.queue(default_concurrency_limit=1)
 gradio_app.launch(
     server_name="0.0.0.0",
     server_port=int(os.environ.get("PORT", 7860)),
@@ -385,9 +213,9 @@ gradio_app.launch(
     debug=False,
     show_error=True,
     quiet=False,
-    prevent_thread_lock=True,  # 防止线程锁定
+    prevent_thread_lock=True,
     inbrowser=False,
-    max_threads=1  # 限制线程数
+    max_threads=1
 )
 app = gr.mount_gradio_app(FastAPI(), gradio_app, path="/")
 handler = Mangum(

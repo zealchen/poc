@@ -41,3 +41,29 @@ This project is an AWS CDK application that deploys a Timecard Processor service
 4.  **Access the application:**
 
     After the deployment is complete, the CDK output will provide a URL for the API Gateway. You can access the Gradio web interface by opening this URL in your browser.
+
+## Running Locally
+
+To run the Gradio application on your local machine for development and testing, you can execute the `timecard_processor.py` script as a module. This is useful for iterating on the UI and application logic without needing to deploy to AWS.
+
+1.  **Set up your environment:**
+
+    Ensure you have the necessary dependencies installed:
+
+    ```bash
+    pip install -r src_lambdas/timecard_processor/requirements.txt
+    ```
+
+    You will also need to have your AWS credentials configured locally so the application can interact with Amazon Bedrock and DynamoDB.
+
+2.  **Run the application:**
+
+    Execute the following command from the root of the project directory:
+
+    ```bash
+    python -m src_lambdas.timecard_processor.timecard_processor
+    ```
+
+3.  **Access the application:**
+
+    The application will be available at `http://127.0.0.1:7860` by default. Open this URL in your browser to interact with the Gradio interface.

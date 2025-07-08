@@ -31,7 +31,8 @@ class TimecardStack(Stack):
         handler = _lambda.DockerImageFunction(
             self, "TimecardProcessor",
             code=_lambda.DockerImageCode.from_image_asset(
-                directory=os.path.join(os.path.dirname(__file__), "..", "src_lambdas", "timecard_processor"),
+                directory="src_lambdas",
+                file="timecard_processor/Dockerfile",
                 platform=Platform.LINUX_AMD64
             ),
             timeout=Duration.minutes(15),  # 保持长超时时间
@@ -41,7 +42,6 @@ class TimecardStack(Stack):
                 "GRADIO_SERVER_NAME": "0.0.0.0",
                 "GRADIO_SERVER_PORT": "7860",
                 "JOB_STATUS_TABLE": job_status_table.table_name,
-                # "RUN_IN_LAMBDA": "true"
             }
         )
 
