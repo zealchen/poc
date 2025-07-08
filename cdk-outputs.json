@@ -1,0 +1,7 @@
+{
+  "TimecardStack": {
+    "JobStatusTableName": "TimecardStack-JobStatusTable044F2BF7-6HOLZ6FRF0E8",
+    "LambdaFunctionName": "TimecardStack-TimecardProcessor2353B133-trM39oK9lGSh",
+    "TimecardApiUrl": "https://k7saxvvn3d.execute-api.us-east-1.amazonaws.com"
+  }
+}

@@ -1,0 +1,96 @@
+from aws_cdk import (
+    Stack,
+    Duration,
+    aws_lambda as _lambda,
+    aws_iam as iam,
+    aws_dynamodb as ddb,
+    aws_apigatewayv2 as apigwv2,
+    aws_apigatewayv2_integrations as integrations,
+    CfnOutput,
+    RemovalPolicy
+)
+from constructs import Construct
+import os
+from aws_cdk.aws_lambda import Architecture
+from aws_cdk.aws_ecr_assets import Platform
+
+class TimecardStack(Stack):
+
+    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        # DynamoDB table for job status
+        job_status_table = ddb.Table(
+            self, "JobStatusTable",
+            partition_key=ddb.Attribute(name="job_id", type=ddb.AttributeType.STRING),
+            billing_mode=ddb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.DESTROY
+        )
+
+        # Define Lambda from Docker image
+        handler = _lambda.DockerImageFunction(
+            self, "TimecardProcessor",
+            code=_lambda.DockerImageCode.from_image_asset(
+                directory=os.path.join(os.path.dirname(__file__), "..", "src_lambdas", "timecard_processor"),
+                platform=Platform.LINUX_AMD64
+            ),
+            timeout=Duration.minutes(15),  # 保持长超时时间
+            memory_size=1024,  # 增加内存
+            architecture=Architecture.X86_64,
+            environment={
+                "GRADIO_SERVER_NAME": "0.0.0.0",
+                "GRADIO_SERVER_PORT": "7860",
+                "JOB_STATUS_TABLE": job_status_table.table_name,
+                # "RUN_IN_LAMBDA": "true"
+            }
+        )
+
+        alias = handler.add_alias("live")
+
+        alias.add_to_role_policy(iam.PolicyStatement(
+            actions=["bedrock:InvokeModel"],
+            resources=["*"]
+        ))
+
+        # Grant Lambda permissions to access DynamoDB table
+        job_status_table.grant_read_write_data(alias)
+
+        # Create HTTP API Gateway with proxy integration
+        http_api = apigwv2.HttpApi(self, "TimecardHttpApi",
+            api_name="TimecardHttpApi",
+            cors_preflight=apigwv2.CorsPreflightOptions(
+                allow_methods=[apigwv2.CorsHttpMethod.ANY],
+                allow_origins=["*"],
+                allow_headers=["*"],
+                max_age=Duration.days(1)
+            )
+        )
+
+        # 修改集成配置，增加超时时间
+        lambda_integration = integrations.HttpLambdaIntegration(
+            "TimecardRootIntegration", 
+            handler=alias,
+            timeout=Duration.seconds(29)  # API Gateway 最大超时时间
+        )
+        
+        proxy_integration = integrations.HttpLambdaIntegration(
+            "TimecardProxyIntegration", 
+            handler=alias,
+            timeout=Duration.seconds(29)  # API Gateway 最大超时时间
+        )
+
+        http_api.add_routes(
+            path="/",
+            methods=[apigwv2.HttpMethod.ANY],
+            integration=lambda_integration
+        )
+
+        http_api.add_routes(
+            path="/{proxy+}",
+            methods=[apigwv2.HttpMethod.ANY],
+            integration=proxy_integration
+        )
+
+        CfnOutput(self, "TimecardApiUrl", value=http_api.api_endpoint)
+        CfnOutput(self, "LambdaFunctionName", value=handler.function_name)
+        CfnOutput(self, "JobStatusTableName", value=job_status_table.table_name)
