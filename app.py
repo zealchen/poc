@@ -4,6 +4,8 @@ import os
 import aws_cdk as cdk
 
 from demo.timecard_stack import TimecardStack
+from demo.benefit_analysis_stack import BenefitAnalysisStack
+from demo.resume_anlysis_stack import ResumeAnalysisStack
 
 
 app = cdk.App()
@@ -24,5 +26,6 @@ TimecardStack(app, "TimecardStack",
 
     # For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
     )
-
+BenefitAnalysisStack(app, "BenefitAnalysisStack")
+ResumeAnalysisStack(app, "ResumeAnalysisStack")
 app.synth()

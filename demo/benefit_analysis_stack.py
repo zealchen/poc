@@ -14,25 +14,25 @@ import os
 from aws_cdk.aws_lambda import Architecture
 from aws_cdk.aws_ecr_assets import Platform
 
-class TimecardStack(Stack):
+class BenefitAnalysisStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # DynamoDB table for job status
-        job_status_table = ddb.Table(
-            self, "JobStatusTable",
-            partition_key=ddb.Attribute(name="job_id", type=ddb.AttributeType.STRING),
-            billing_mode=ddb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY
-        )
+        # job_status_table = ddb.Table(
+        #     self, "JobStatusTable",
+        #     partition_key=ddb.Attribute(name="job_id", type=ddb.AttributeType.STRING),
+        #     billing_mode=ddb.BillingMode.PAY_PER_REQUEST,
+        #     removal_policy=RemovalPolicy.DESTROY
+        # )
 
         # Define Lambda from Docker image
         handler = _lambda.DockerImageFunction(
-            self, "TimecardProcessor",
+            self, "BenefitAnalysisLambda",
             code=_lambda.DockerImageCode.from_image_asset(
                 directory="src_lambdas",
-                file="timecard_processor/Dockerfile",
+                file="benefit_analysis/Dockerfile",
                 platform=Platform.LINUX_AMD64
             ),
             timeout=Duration.minutes(15),
@@ -41,7 +41,7 @@ class TimecardStack(Stack):
             environment={
                 "GRADIO_SERVER_NAME": "0.0.0.0",
                 "GRADIO_SERVER_PORT": "7860",
-                "JOB_STATUS_TABLE": job_status_table.table_name,
+                # "JOB_STATUS_TABLE": job_status_table.table_name,
             }
         )
 
@@ -53,11 +53,11 @@ class TimecardStack(Stack):
         ))
 
         # Grant Lambda permissions to access DynamoDB table
-        job_status_table.grant_read_write_data(alias)
+        # job_status_table.grant_read_write_data(alias)
 
         # Create HTTP API Gateway with proxy integration
-        http_api = apigwv2.HttpApi(self, "TimecardHttpApi",
-            api_name="TimecardHttpApi",
+        http_api = apigwv2.HttpApi(self, "BenefitAnalysisHttpApi",
+            api_name="BenefitAnalysisHttpApi",
             cors_preflight=apigwv2.CorsPreflightOptions(
                 allow_methods=[apigwv2.CorsHttpMethod.ANY],
                 allow_origins=["*"],
@@ -67,13 +67,13 @@ class TimecardStack(Stack):
         )
 
         lambda_integration = integrations.HttpLambdaIntegration(
-            "TimecardRootIntegration", 
+            "BenefitAnalysisRootIntegration", 
             handler=alias,
             timeout=Duration.seconds(29)
         )
         
         proxy_integration = integrations.HttpLambdaIntegration(
-            "TimecardProxyIntegration", 
+            "BenefitAnalysisProxyIntegration", 
             handler=alias,
             timeout=Duration.seconds(29)
         )
@@ -90,6 +90,6 @@ class TimecardStack(Stack):
             integration=proxy_integration
         )
 
-        CfnOutput(self, "TimecardApiUrl", value=http_api.api_endpoint)
+        CfnOutput(self, "BenefitAnalysisApiUrl", value=http_api.api_endpoint)
         CfnOutput(self, "LambdaFunctionName", value=handler.function_name)
-        CfnOutput(self, "JobStatusTableName", value=job_status_table.table_name)
+        # CfnOutput(self, "JobStatusTableName", value=job_status_table.table_name)
