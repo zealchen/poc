@@ -6,6 +6,7 @@ import aws_cdk as cdk
 from demo.timecard_stack import TimecardStack
 from demo.benefit_analysis_stack import BenefitAnalysisStack
 from demo.resume_anlysis_stack import ResumeAnalysisStack
+from demo.rfp_req_extraction_stack import RfpReqExtractionStack
 
 
 app = cdk.App()
@@ -28,4 +29,5 @@ TimecardStack(app, "TimecardStack",
     )
 BenefitAnalysisStack(app, "BenefitAnalysisStack")
 ResumeAnalysisStack(app, "ResumeAnalysisStack")
+RfpReqExtractionStack(app, "RfpReqExtractionStack")
 app.synth()

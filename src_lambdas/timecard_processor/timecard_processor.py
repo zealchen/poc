@@ -205,18 +205,6 @@ def create_gradio_app():
     return demo
 
 gradio_app = create_gradio_app()
-gradio_app.queue(default_concurrency_limit=1)
-gradio_app.launch(
-    server_name="0.0.0.0",
-    server_port=int(os.environ.get("PORT", 7860)),
-    share=False,
-    debug=False,
-    show_error=True,
-    quiet=False,
-    prevent_thread_lock=True,
-    inbrowser=False,
-    max_threads=1
-)
 app = gr.mount_gradio_app(FastAPI(), gradio_app, path="/")
 handler = Mangum(
     app, 
@@ -236,4 +224,15 @@ handler = Mangum(
 )
 
 if __name__ == "__main__":
-    gradio_app.launch(quiet=False, debug=True)
+    gradio_app.queue(default_concurrency_limit=1)
+    gradio_app.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.environ.get("PORT", 7860)),
+        share=False,
+        debug=True,
+        show_error=True,
+        quiet=False,
+        prevent_thread_lock=True,
+        inbrowser=False,
+        max_threads=1
+    )

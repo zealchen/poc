@@ -162,3 +162,45 @@ def invoke_model(client, model_id, prompt, max_tokens=20000, attachment=None, te
         response_text = response["output"]["message"]["content"][0]["text"]
         return response_text
 
+
+def classify_rfp_requirement(client, model_id, chunk: str) -> dict:
+    """
+    Uses a Bedrock LLM to analyze a text chunk and classify it as a requirement.
+
+    Args:
+        client: The boto3 bedrock-runtime client.
+        model_id: The ID of the model to use (e.g., Claude 3 Sonnet).
+        chunk: The text chunk to analyze.
+
+    Returns:
+        A dictionary containing the classification.
+    """
+    prompt = f"""
+Human: You are a compliance analyst. Your task is to analyze the following text from a Request for Proposal (RFP) and determine two things:
+1.  Is this text a requirement that a vendor must fulfill?
+2.  If it is a requirement, classify its type. The classification should be based on how a vendor must demonstrate compliance.
+
+The classifications are:
+- 'Response-Based': The requirement explicitly asks the vendor to provide a written response, description, plan, or proposal within their RFP submission. Keywords often include "describe", "propose", "provide a plan", "explain".
+- 'Action-Based': The requirement obligates the vendor to perform an action, adhere to a standard, or possess a capability. Compliance is demonstrated by doing something, not just writing about it. Keywords often include "shall", "must", "will provide".
+
+Analyze the following text:
+<text>
+{chunk}
+</text>
+
+Respond *only* with a valid JSON object with two keys: "is_requirement" (boolean) and "classification" (string, which must be one of "Response-Based", "Action-Based", or "N/A").
+Assistant:
+"""
+    try:
+        # We expect the model to return a JSON string.
+        response_text = invoke_model(client, model_id, prompt, max_tokens=1000, temperature=0.1)
+        return format_result(response_text)
+    except Exception as e:
+        print(f"Error during requirement classification: {e}")
+        # In case of model error or malformed JSON, return a default error state.
+        return {
+            "is_requirement": False,
+            "classification": "Error"
+        }
+
