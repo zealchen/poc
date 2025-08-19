@@ -19,7 +19,7 @@ Content Alignment:
 - **Passage must be secured from copyright issues** only use public domain content.
 
 Item Components:
-1. Question Stem: Write a clear question or prompt for the student.
+1. Question Stem: Write a clear question or prompt for the student and be sure to include a passage if it is needed.
 2. Correct Answer: Provide the single correct answer or the correct response, as well as a rationale for why it is correct.
 3. Distractors (for selected-response items): Create three plausible but incorrect answer choices. Explain the reasoning behind each distractor (e.g., what common misconception or error it represents).
 

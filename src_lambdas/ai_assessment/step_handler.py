@@ -84,7 +84,7 @@ def handler(event, context):
             subject = event.get('execution_input', {}).get('subject')
             grade_level = event.get('execution_input', {}).get('grade_level')
             item_type = event.get('execution_input', {}).get('item_type')
-            prompt = TEST_GENERATION.replace('{subject}', subject).replace('{grade_level}', grade_level).replace('{item_type}', item_type)
+            prompt = TEST_GENERATION.replace('{subject}', subject).replace('{grade_level}', str(grade_level)).replace('{item_type}', item_type)
             result = format_result(invoke_model(CLIENT, modelARN_Claude37_v1, prompt))
             LOGGER.info(f'create test item: {json.dumps(result)}')
             return {
