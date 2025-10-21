@@ -1,7 +1,6 @@
 import json
 import os
 import boto3
-import uuid
 import requests
 import logging
 from common.llm import invoke_model, format_result
