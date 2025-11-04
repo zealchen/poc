@@ -7,12 +7,13 @@ import requests
 import logging
 from typing import Dict, Any, Optional
 from urllib.parse import urlparse
-from common.llm import invoke_model, format_result
+from common.llm import invoke_model
 from common.utils import get_bedrock_client
 from xml_example import XML_EXAMPLE_MAP
 from prompt import (
     TEST_GENERATION,
     TEST_VERIFICATION,
+    PSYCHOMETRIC_VERIFICATION,
     CURRICULUM_GENERATION,
     CURRICULUM_VERIFICATION
 )
@@ -287,7 +288,7 @@ def handle_parse_curriculum(event: Dict[str, Any], clients: Dict) -> Dict[str, A
 
         # Generate curriculum structure using LLM
         prompt = CURRICULUM_GENERATION.replace('{content}', content)
-        result = format_result(invoke_model(clients['bedrock'], MODEL_ARN_CLAUDE, prompt))
+        result = invoke_model(clients['bedrock'], MODEL_ARN_CLAUDE, prompt, format='json')
 
         # Process requirements
         requirements = []
@@ -349,11 +350,11 @@ def handle_create_test(event: Dict[str, Any], clients: Dict) -> Dict[str, Any]:
         .replace('{requirement}', requirement_text)\
         .replace('{example_xlm}', XML_EXAMPLE_MAP[qti_format])
 
-    LOGGER.info(f'test generate prompt: {prompt}')
+    # LOGGER.info(f'test generate prompt: {prompt}')
 
     # Generate test item
     LOGGER.info(f"Generating test for subject={subject}, grade={grade_level}, format={qti_format}")
-    result = format_result(invoke_model(clients['bedrock'], MODEL_ARN_CLAUDE, prompt))
+    result = invoke_model(clients['bedrock'], MODEL_ARN_CLAUDE, prompt, format='json')
     result['qti_format'] = qti_format
     result['qti_xml'] = expand_self_closing_tags(result['qti_xml'])
 
@@ -366,15 +367,23 @@ def handle_verify_test(event: Dict[str, Any], clients: Dict) -> Optional[Dict[st
     """Verify generated test item"""
     LOGGER.info("Verifying test item")
 
-    test_content = json.dumps(event.get('create_test_task_result', {}))
+    test_content = event.get('create_test_task_result', {})
     requirement = event.get('requirement')
+    execution_input = event.get('execution_input', {})
+    subject = execution_input.get('subject', '')
+    grade_level = execution_input.get('grade_level', '')
 
     # Verify test content
-    prompt = TEST_VERIFICATION.replace('{test_content}', test_content)
-    result = format_result(invoke_model(clients['bedrock'], MODEL_ARN_DEEPSEEK, prompt))
+    prompt = TEST_VERIFICATION.replace('{test_content}', json.dumps(test_content))
+    result = invoke_model(clients['bedrock'], MODEL_ARN_DEEPSEEK, prompt, format='json')
 
     # Build verification result
     verify_result = event.get('create_test_task_result', {}).copy()
+    verify_result.update(result)
+
+    prompt = PSYCHOMETRIC_VERIFICATION.replace('{subject}', subject).replace(
+        "{grade_level}", str(grade_level)).replace("{qti_xml}", test_content['qti_xml'])
+    result = invoke_model(clients['bedrock'], MODEL_ARN_DEEPSEEK, prompt, format='json')
     verify_result.update(result)
 
     LOGGER.info(f'Test verification result: {json.dumps(verify_result)}')
@@ -384,11 +393,11 @@ def handle_verify_test(event: Dict[str, Any], clients: Dict) -> Optional[Dict[st
         category = requirement.get('category', '')
         requirement_text = requirement.get('requirement', '')
 
-        prompt = CURRICULUM_VERIFICATION.replace('{test_content}', test_content)\
+        prompt = CURRICULUM_VERIFICATION.replace('{test_content}', test_content['qti_xml'])\
             .replace('{category}', category)\
             .replace('{requirement}', requirement_text)
 
-        curriculum_result = format_result(invoke_model(clients['bedrock'], MODEL_ARN_DEEPSEEK, prompt))
+        curriculum_result = invoke_model(clients['bedrock'], MODEL_ARN_DEEPSEEK, prompt, format='json')
         verify_result.update(curriculum_result)
         verify_result['requirement'] = requirement
 
@@ -441,11 +450,14 @@ def handle_aggregate_results(event: Dict[str, Any], clients: Dict) -> Dict[str, 
         curriculum_map[category_id]['requirements'][requirement_id] = item.get('requirement', '')
 
     # Process questions
+    questions = []
     for map_result in map_results:
         requirement = map_result.pop('requirement', {})
         map_result['category_id'] = requirement.get('category_id')
         map_result['requirement_id'] = requirement.get('req_id', requirement.get('requirement_id'))
-        result['questions'].append(map_result)
+        questions.append(map_result)
+    questions = sorted(questions, key=lambda x: x['psychology_score'])
+    result['questions'] = questions
 
     # Build curriculum structure
     for category_id, detail in curriculum_map.items():

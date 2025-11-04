@@ -1,5 +1,10 @@
 import re
 import json
+from botocore import retries
+import retry
+import logging
+LOGGER = logging.getLogger()
+LOGGER.setLevel(logging.INFO)
 
 
 def format_result(content, type='json'):
@@ -20,7 +25,8 @@ def format_result(content, type='json'):
             return content
 
 
-def invoke_model(client, model_id, prompt, max_tokens=20000, attachment=None, temperature=0.9):
+@retry.retry(tries=3)
+def invoke_model(client, model_id, prompt, max_tokens=20000, attachment=None, temperature=0.9, format=''):
     if model_id.find('mistral') != -1:
         payload = {
             "messages" : [
@@ -50,7 +56,12 @@ def invoke_model(client, model_id, prompt, max_tokens=20000, attachment=None, te
             body=body
         )
         response_body = json.loads(response['body'].read())
-        return response_body['choices'][0]['message']['content']
+        result_text = response_body['choices'][0]['message']['content']
+        LOGGER.info(f"result_text: {result_text}")
+        if format:
+            return format_result(result_text, format)
+        else:
+            return result_text
     elif model_id.find('claude') != -1:
         payload = {
             "anthropic_version": "bedrock-2023-05-31",
@@ -86,14 +97,19 @@ def invoke_model(client, model_id, prompt, max_tokens=20000, attachment=None, te
 
         response_body = json.loads(response['body'].read())
         response_content = response_body.pop('content')
-        return response_content[0]['text']
+        result_text = response_content[0]['text']
+        LOGGER.info(f"result_text: {result_text}")
+        if format:
+            return format_result(result_text, format)
+        else:
+            return result_text
     elif model_id.find('deepseek') != -1:
         # DEEPSEEK invoke_model does not return the text response and reasoning process in one block text!!!
         # # Embed the prompt in DeepSeek-R1's instruction format.
         # formatted_prompt = f"""
         # <｜begin▁of▁sentence｜><｜User｜>{prompt}<｜Assistant｜><think>\n
         # """
-        
+
         # if attachment:
         #     raise Exception('deepseek R1 is none multi-model, could not input attachment.')
 
@@ -107,7 +123,7 @@ def invoke_model(client, model_id, prompt, max_tokens=20000, attachment=None, te
         # model_response = json.loads(response["body"].read())
         # choices = model_response["choices"]
         # return choices[0]['text']
-        
+
         response = client.converse(
             modelId=model_id,
             messages=[
@@ -126,7 +142,12 @@ def invoke_model(client, model_id, prompt, max_tokens=20000, attachment=None, te
             }
         )
         response_content = response['output']['message'].pop('content')
-        return response_content[0]['text']
+        result_text = response_content[0]['text']
+        LOGGER.info(f"result_text: {result_text}")
+        if format:
+            return format_result(result_text, format)
+        else:
+            return result_text
     elif model_id.find('llama') != -1:
         payload = {
             "messages": [
@@ -203,4 +224,3 @@ Assistant:
             "is_requirement": False,
             "classification": "Error"
         }
-
